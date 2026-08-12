@@ -1,12 +1,19 @@
 import { type ChangeEvent, type DragEvent, type FormEvent, useEffect, useRef, useState } from 'react'
 import './App.css'
 
-type Source = { page: number; excerpt: string }
+type Source = {
+  page: number | null
+  row_start: number | null
+  row_end: number | null
+  excerpt: string
+}
 
 type UploadedDocument = {
   document_id: string
   filename: string
-  pages: number
+  file_type: 'pdf' | 'csv'
+  pages: number | null
+  rows: number | null
   chunks: number
   chunking_method: string
   max_tokens_per_chunk: number
@@ -115,14 +122,15 @@ function App() {
     clearResult()
     setDocument(null)
     if (!selectedFile) return
-    if (selectedFile.type !== 'application/pdf' && !selectedFile.name.toLowerCase().endsWith('.pdf')) {
+    const extension = selectedFile.name.toLowerCase().split('.').pop()
+    if (extension !== 'pdf' && extension !== 'csv') {
       setFile(null)
-      setError('Escolha um arquivo em formato PDF.')
+      setError('Escolha um arquivo em formato PDF ou CSV.')
       return
     }
     if (selectedFile.size > 20 * 1024 * 1024) {
       setFile(null)
-      setError('O PDF deve ter no máximo 20 MB.')
+      setError('O arquivo deve ter no máximo 20 MB.')
       return
     }
     setFile(selectedFile)
@@ -143,7 +151,7 @@ function App() {
     try {
       setDocument(await requestJson<UploadedDocument>('/documents', { method: 'POST', body: formData }))
     } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : 'Falha ao enviar o PDF.')
+      setError(caughtError instanceof Error ? caughtError.message : 'Falha ao enviar o arquivo.')
     } finally {
       setIsUploading(false)
     }
@@ -223,7 +231,12 @@ function App() {
   const renderSources = (sources: Source[]) => sources.length > 0 && (
     <div className="sources">
       <h3>Trechos consultados</h3>
-      {sources.map((source, index) => <article className="source" key={`${source.page}-${index}`}><span>Pág. {source.page}</span><p>{source.excerpt}</p></article>)}
+      {sources.map((source, index) => {
+        const location = source.row_start !== null
+          ? source.row_start === (source.row_end ?? source.row_start) ? `Linha ${source.row_start}` : `Linhas ${source.row_start}–${source.row_end}`
+          : `Pág. ${source.page}`
+        return <article className="source" key={`${location}-${index}`}><span>{location}</span><p>{source.excerpt}</p></article>
+      })}
     </div>
   )
 
@@ -268,6 +281,9 @@ function App() {
   const clarificationQuestions = researchSession?.clarification_questions ?? []
   const clarificationIndex = researchSession?.clarification_responses?.length ?? 0
   const currentClarification = clarificationQuestions[clarificationIndex]
+  const processedUnits = document?.file_type === 'csv'
+    ? `${document.rows ?? 0} ${(document.rows ?? 0) === 1 ? 'linha processada' : 'linhas processadas'}`
+    : `${document?.pages ?? 0} ${(document?.pages ?? 0) === 1 ? 'página processada' : 'páginas processadas'}`
 
   return (
     <main className="app-shell">
@@ -278,24 +294,24 @@ function App() {
         <div className="brand-mark" aria-hidden="true">✦</div>
         <p className="eyebrow">LEITOR INTELIGENTE</p>
         <h1>Converse com seu documento</h1>
-        <p className="subtitle">Envie um PDF e obtenha respostas baseadas exclusivamente no conteúdo dele.</p>
+        <p className="subtitle">Envie um PDF ou CSV e obtenha respostas baseadas exclusivamente no conteúdo dele.</p>
       </header>
 
       <section className="workspace" aria-label="Consulta de documento">
-        <div className="step-heading"><span>1</span><div><h2>Envie seu PDF</h2><p>Arquivos de até 20 MB</p></div></div>
+        <div className="step-heading"><span>1</span><div><h2>Envie seu arquivo</h2><p>PDF ou CSV de até 20 MB</p></div></div>
         {!document ? <>
           <div className={`drop-zone ${file ? 'has-file' : ''}`} onDragOver={(event) => event.preventDefault()} onDrop={handleDrop}>
-            <input ref={fileInputRef} id="pdf-upload" type="file" accept="application/pdf,.pdf" onChange={handleFileChange} />
+            <input ref={fileInputRef} id="document-upload" type="file" accept=".pdf,.csv,application/pdf,text/csv" onChange={handleFileChange} />
             <div className="file-icon" aria-hidden="true">⌁</div>
-            {file ? <div className="selected-file"><strong>{file.name}</strong><span>{(file.size / 1024 / 1024).toFixed(2)} MB</span></div> : <><strong>Arraste o PDF aqui</strong><span>ou</span></>}
-            <label htmlFor="pdf-upload" className="secondary-button">Selecionar arquivo</label>
+            {file ? <div className="selected-file"><strong>{file.name}</strong><span>{(file.size / 1024 / 1024).toFixed(2)} MB</span></div> : <><strong>Arraste o PDF ou CSV aqui</strong><span>ou</span></>}
+            <label htmlFor="document-upload" className="secondary-button">Selecionar arquivo</label>
           </div>
           {file && <button className="primary-button upload-button" type="button" onClick={uploadDocument} disabled={isUploading}>{isUploading ? 'Preparando documento…' : 'Enviar e preparar'}</button>}
-        </> : <div className="document-ready"><div className="ready-icon" aria-hidden="true">✓</div><div><strong>{document.filename}</strong><p>{document.pages} {document.pages === 1 ? 'página processada' : 'páginas processadas'} · {document.chunks} trechos prontos</p></div><button className="text-button" type="button" onClick={resetDocument}>Trocar</button></div>}
+        </> : <div className="document-ready"><div className="ready-icon" aria-hidden="true">✓</div><div><strong>{document.filename}</strong><p>{processedUnits} · {document.chunks} trechos prontos</p></div><button className="text-button" type="button" onClick={resetDocument}>Trocar</button></div>}
         {error && <p className="error-message" role="alert">{error}</p>}
 
         <div className={`question-section ${document ? 'is-ready' : ''}`}>
-          <div className="step-heading"><span>2</span><div><h2>Pergunte ao documento</h2><p>{document ? 'Escolha entre resposta rápida e dois fluxos de pesquisa aprofundada' : 'Disponível após o envio do PDF'}</p></div></div>
+          <div className="step-heading"><span>2</span><div><h2>Pergunte ao documento</h2><p>{document ? 'Escolha entre resposta rápida e dois fluxos de pesquisa aprofundada' : 'Disponível após o envio do arquivo'}</p></div></div>
           <form onSubmit={submitQuery}>
             <div className="query-options" role="radiogroup" aria-label="Tipo de consulta">
               <label className={mode === 'question' ? 'is-selected' : ''}><input type="radio" name="query-mode" value="question" checked={mode === 'question'} onChange={() => setMode('question')} disabled={!document || isAsking} /><span><strong>Resposta rápida</strong><small>Uma pergunta, com os trechos mais relevantes.</small></span></label>
@@ -303,7 +319,7 @@ function App() {
               <label className={mode === 'research_guided' ? 'is-selected' : ''}><input type="radio" name="query-mode" value="research_guided" checked={mode === 'research_guided'} onChange={() => setMode('research_guided')} disabled={!document || isAsking} /><span><strong>Pesquisa assistida</strong><small>Pode pedir esclarecimentos antes de investigar.</small></span></label>
             </div>
             {mode !== 'question' && <label className="depth-field">Profundidade da pesquisa <select value={depth} onChange={(event) => setDepth(Number(event.target.value))} disabled={!document || isAsking}>{[1, 2, 3].map((value) => <option key={value} value={value}>{value} {value === 1 ? 'rodada' : 'rodadas'}</option>)}</select></label>}
-            <textarea value={question} onChange={(event) => setQuestion(event.target.value)} disabled={!document || isAsking} placeholder={mode !== 'question' ? 'Ex.: Compare os principais argumentos e suas evidências.' : 'Ex.: Quais são os pontos principais deste documento?'} rows={4} />
+            <textarea value={question} onChange={(event) => setQuestion(event.target.value)} disabled={!document || isAsking} placeholder={mode !== 'question' ? 'Ex.: Compare os principais argumentos e suas evidências.' : 'Ex.: Quais são os pontos principais deste documento?'} rows={4} maxLength={2000} />
             <button className="primary-button" type="submit" disabled={!document || question.trim().length < 3 || isAsking}>{isAsking ? (mode === 'question' ? 'Buscando resposta…' : 'Pesquisando…') : mode === 'question' ? 'Perguntar →' : mode === 'research_direct' ? 'Pesquisar diretamente →' : 'Iniciar pesquisa assistida →'}</button>
           </form>
         </div>
@@ -311,10 +327,10 @@ function App() {
 
       {answer && <section className="answer-card" aria-live="polite"><p className="answer-label">RESPOSTA</p><p className="answer-text">{answer.answer}</p>{renderSources(answer.sources)}</section>}
       {directResearch && renderResearch({ label: 'PESQUISA DIRETA', answer: directResearch.answer, findings: directResearch.findings, sources: directResearch.sources, rounds: directResearch.rounds_completed, followUps: directResearch.review.follow_up_questions, sufficiency: directResearch.sufficiency_check })}
-      {researchSession?.status === 'awaiting_clarification' && currentClarification && <section className="answer-card clarification-card" aria-live="polite"><p className="answer-label">ANTES DE PESQUISAR</p><h2>Ajude a delimitar a pesquisa</h2><p className="clarification-progress">Pergunta {clarificationIndex + 1} de {clarificationQuestions.length}</p><p className="clarification-question">{currentClarification}</p><form onSubmit={submitClarification}><textarea value={clarificationAnswer} onChange={(event) => setClarificationAnswer(event.target.value)} disabled={isAsking} placeholder="Digite seu esclarecimento…" rows={3} autoFocus /><button className="primary-button" type="submit" disabled={!clarificationAnswer.trim() || isAsking}>{isAsking ? 'Continuando…' : clarificationIndex + 1 === clarificationQuestions.length ? 'Responder e pesquisar →' : 'Responder →'}</button></form></section>}
+      {researchSession?.status === 'awaiting_clarification' && currentClarification && <section className="answer-card clarification-card" aria-live="polite"><p className="answer-label">ANTES DE PESQUISAR</p><h2>Ajude a delimitar a pesquisa</h2><p className="clarification-progress">Pergunta {clarificationIndex + 1} de {clarificationQuestions.length}</p><p className="clarification-question">{currentClarification}</p><form onSubmit={submitClarification}><textarea value={clarificationAnswer} onChange={(event) => setClarificationAnswer(event.target.value)} disabled={isAsking} placeholder="Digite seu esclarecimento…" rows={3} maxLength={1000} autoFocus /><button className="primary-button" type="submit" disabled={!clarificationAnswer.trim() || isAsking}>{isAsking ? 'Continuando…' : clarificationIndex + 1 === clarificationQuestions.length ? 'Responder e pesquisar →' : 'Responder →'}</button></form></section>}
       {researchSession?.status === 'researching' && <section className="answer-card research-status" aria-live="polite"><p className="answer-label">PESQUISA EM ANDAMENTO</p><p>Planejando consultas, verificando evidências e preparando o relatório…</p></section>}
       {researchSession?.status === 'completed' && researchSession.report_data && renderResearch({ label: 'PESQUISA ASSISTIDA', answer: researchSession.report_data.markdown_report, findings: researchSession.findings, sources: researchSession.sources, rounds: researchSession.rounds_completed, followUps: researchSession.report_data.follow_up_questions, sufficiency: researchSession.sufficiency_check })}
-      <footer>Seus documentos ficam disponíveis somente enquanto a API estiver em execução.</footer>
+      <footer>Seus arquivos ficam disponíveis somente enquanto a API estiver em execução.</footer>
     </main>
   )
 }
