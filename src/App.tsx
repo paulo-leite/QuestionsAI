@@ -21,6 +21,62 @@ type UploadedDocument = {
   average_chunk_tokens: number
   maximum_chunk_tokens: number
   average_chunk_characters: number
+  data_quality: DataQualityReport | null
+}
+
+type DataQualityStatus = 'aprovada' | 'atencao' | 'critica' | 'nao_avaliada'
+type DataQualitySeverity = 'baixa' | 'media' | 'alta'
+
+type DataQualityReport = {
+  analysis_version: string
+  validation_engines: string[]
+  filename: string
+  reference_filename: string | null
+  dataset: {
+    rows: number
+    columns: number
+    cells: number
+    missing_cells: number
+    missing_percentage: number
+    exact_duplicate_rows: number
+  }
+  dimensions: Array<{
+    dimension: string
+    status: DataQualityStatus
+    findings_count: number
+    high_severity_count: number
+    summary: string
+  }>
+  columns: Array<{
+    name: string
+    inferred_type: string
+    type_confidence: number
+    non_missing_count: number
+    missing_count: number
+    missing_percentage: number
+    distinct_count: number
+    distinct_percentage: number
+    minimum: number | string | null
+    maximum: number | string | null
+    mean: number | null
+    median: number | null
+    standard_deviation: number | null
+    outlier_count: number
+  }>
+  findings: Array<{
+    finding_id: string
+    dimension: string
+    severity: DataQualitySeverity
+    confidence: number
+    scope: string
+    title: string
+    description: string
+    evidence: string[]
+    recommendation: string
+    limitations: string | null
+  }>
+  findings_by_severity: Record<string, number>
+  limitations: string[]
 }
 
 type Answer = { answer: string; sources: Source[] }
@@ -251,6 +307,99 @@ function App() {
     </div>
   )
 
+  const renderDataQuality = (report: DataQualityReport) => {
+    const formatLabel = (value: string) => value
+      .replaceAll('_', ' ')
+      .replace(/\b\w/g, (letter) => letter.toUpperCase())
+    const statusLabel: Record<DataQualityStatus, string> = {
+      aprovada: 'Aprovada',
+      atencao: 'Atenção',
+      critica: 'Crítica',
+      nao_avaliada: 'Não avaliada',
+    }
+    const severityLabel: Record<DataQualitySeverity, string> = {
+      baixa: 'Baixa',
+      media: 'Média',
+      alta: 'Alta',
+    }
+
+    return (
+      <section className="data-quality" aria-labelledby="data-quality-title">
+        <div className="data-quality-heading">
+          <div>
+            <p className="quality-eyebrow">QUALIDADE DOS DADOS</p>
+            <h3 id="data-quality-title">Resultado da auditoria</h3>
+          </div>
+          <span className={`quality-total ${report.findings.length > 0 ? 'has-findings' : ''}`}>
+            {report.findings.length} {report.findings.length === 1 ? 'achado' : 'achados'}
+          </span>
+        </div>
+
+        <div className="quality-stats" aria-label="Resumo do conjunto de dados">
+          <div><strong>{report.dataset.rows.toLocaleString('pt-BR')}</strong><span>Linhas</span></div>
+          <div><strong>{report.dataset.columns.toLocaleString('pt-BR')}</strong><span>Colunas</span></div>
+          <div><strong>{report.dataset.missing_percentage.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}%</strong><span>Dados ausentes</span></div>
+          <div><strong>{report.dataset.exact_duplicate_rows.toLocaleString('pt-BR')}</strong><span>Duplicadas</span></div>
+        </div>
+
+        <div className="quality-dimensions">
+          <h4>Dimensões avaliadas</h4>
+          <div className="dimension-grid">
+            {report.dimensions.map((dimension) => (
+              <article className={`quality-dimension status-${dimension.status}`} key={dimension.dimension}>
+                <span className="status-dot" aria-hidden="true" />
+                <div className="dimension-content"><strong>{formatLabel(dimension.dimension)}</strong><small>{statusLabel[dimension.status]}{dimension.findings_count > 0 ? ` · ${dimension.findings_count}` : ''}</small></div>
+                {dimension.status === 'nao_avaliada' && (
+                  <button className="dimension-info" type="button" aria-label={`Resumo de ${formatLabel(dimension.dimension)}: ${dimension.summary}`}>
+                    <span aria-hidden="true">i</span>
+                    <span className="dimension-tooltip" role="tooltip">{dimension.summary}</span>
+                  </button>
+                )}
+              </article>
+            ))}
+          </div>
+        </div>
+
+        {report.findings.length > 0 ? (
+          <div className="quality-findings">
+            <h4>Achados e recomendações</h4>
+            {report.findings.map((finding) => (
+              <details className={`quality-finding severity-${finding.severity}`} key={finding.finding_id}>
+                <summary>
+                  <span className="severity-badge">{severityLabel[finding.severity]}</span>
+                  <span><strong>{finding.title}</strong><small>{formatLabel(finding.dimension)} · {finding.scope}</small></span>
+                </summary>
+                <div className="finding-content">
+                  <p>{finding.description}</p>
+                  {finding.evidence.length > 0 && <div><strong>Evidências</strong><ul>{finding.evidence.map((evidence, index) => <li key={`${evidence}-${index}`}>{evidence}</li>)}</ul></div>}
+                  <p className="recommendation"><strong>Recomendação</strong>{finding.recommendation}</p>
+                </div>
+              </details>
+            ))}
+          </div>
+        ) : <p className="quality-empty">Nenhum problema objetivo foi encontrado nesta análise.</p>}
+
+        <details className="quality-columns">
+          <summary>Ver perfil das {report.columns.length} colunas</summary>
+          <div className="column-list">
+            {report.columns.map((column) => (
+              <article key={column.name}>
+                <div><strong>{column.name}</strong><span>{formatLabel(column.inferred_type)}</span></div>
+                <dl>
+                  <div><dt>Preenchimento</dt><dd>{(100 - column.missing_percentage).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%</dd></div>
+                  <div><dt>Valores distintos</dt><dd>{column.distinct_count.toLocaleString('pt-BR')}</dd></div>
+                  <div><dt>Atípicos</dt><dd>{column.outlier_count.toLocaleString('pt-BR')}</dd></div>
+                </dl>
+              </article>
+            ))}
+          </div>
+        </details>
+
+        {report.limitations.length > 0 && <details className="quality-limitations"><summary>Limitações da análise</summary><ul>{report.limitations.map((limitation) => <li key={limitation}>{limitation}</li>)}</ul></details>}
+      </section>
+    )
+  }
+
   const renderResearch = ({
     label,
     answer: researchAnswer,
@@ -307,7 +456,7 @@ function App() {
             <label htmlFor="document-upload" className="secondary-button">Selecionar arquivo</label>
           </div>
           {file && <button className="primary-button upload-button" type="button" onClick={uploadDocument} disabled={isUploading}>{isUploading ? 'Preparando documento…' : 'Enviar e preparar'}</button>}
-        </> : <div className="document-ready"><div className="ready-icon" aria-hidden="true">✓</div><div><strong>{document.filename}</strong><p>{processedUnits} · {document.chunks} trechos prontos</p></div><button className="text-button" type="button" onClick={resetDocument}>Trocar</button></div>}
+        </> : <><div className="document-ready"><div className="ready-icon" aria-hidden="true">✓</div><div><strong>{document.filename}</strong><p>{processedUnits} · {document.chunks} trechos prontos</p></div><button className="text-button" type="button" onClick={resetDocument}>Trocar</button></div>{document.data_quality && renderDataQuality(document.data_quality)}</>}
         {error && <p className="error-message" role="alert">{error}</p>}
 
         <div className={`question-section ${document ? 'is-ready' : ''}`}>
