@@ -68,10 +68,15 @@ type DataQualityReport = {
     dimension: string
     severity: DataQualitySeverity
     confidence: number
+    confidence_percentage: number
+    coverage_percentage: number
+    confidence_basis: string[]
+    veracity_confidence: number | null
     scope: string
     title: string
     description: string
     evidence: string[]
+    metrics: Record<string, unknown>
     recommendation: string
     limitations: string | null
   }>
@@ -148,8 +153,10 @@ const requestJson = async <T,>(path: string, init?: RequestInit): Promise<T> => 
 
 function App() {
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const referenceFileInputRef = useRef<HTMLInputElement>(null)
   const [isDark, setIsDark] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches)
   const [file, setFile] = useState<File | null>(null)
+  const [referenceFile, setReferenceFile] = useState<File | null>(null)
   const [document, setDocument] = useState<UploadedDocument | null>(null)
   const [question, setQuestion] = useState('')
   const [mode, setMode] = useState<QueryMode>('question')
@@ -177,6 +184,8 @@ function App() {
     setError('')
     clearResult()
     setDocument(null)
+    setReferenceFile(null)
+    if (referenceFileInputRef.current) referenceFileInputRef.current.value = ''
     if (!selectedFile) return
     const extension = selectedFile.name.toLowerCase().split('.').pop()
     if (extension !== 'pdf' && extension !== 'csv') {
@@ -193,6 +202,27 @@ function App() {
   }
 
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => selectFile(event.target.files?.[0])
+  const handleReferenceFileChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const selectedFile = event.target.files?.[0]
+    setError('')
+    if (!selectedFile) {
+      setReferenceFile(null)
+      return
+    }
+    if (!selectedFile.name.toLowerCase().endsWith('.csv')) {
+      setReferenceFile(null)
+      event.target.value = ''
+      setError('O arquivo de referência deve estar no formato CSV.')
+      return
+    }
+    if (selectedFile.size > 20 * 1024 * 1024) {
+      setReferenceFile(null)
+      event.target.value = ''
+      setError('O arquivo de referência deve ter no máximo 20 MB.')
+      return
+    }
+    setReferenceFile(selectedFile)
+  }
   const handleDrop = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault()
     selectFile(event.dataTransfer.files[0])
@@ -204,6 +234,7 @@ function App() {
     setError('')
     const formData = new FormData()
     formData.append('file', file)
+    if (referenceFile) formData.append('reference_file', referenceFile)
     try {
       setDocument(await requestJson<UploadedDocument>('/documents', { method: 'POST', body: formData }))
     } catch (caughtError) {
@@ -277,11 +308,13 @@ function App() {
 
   const resetDocument = () => {
     setFile(null)
+    setReferenceFile(null)
     setDocument(null)
     clearResult()
     setQuestion('')
     setError('')
     if (fileInputRef.current) fileInputRef.current.value = ''
+    if (referenceFileInputRef.current) referenceFileInputRef.current.value = ''
   }
 
   const renderSources = (sources: Source[]) => sources.length > 0 && (
@@ -322,6 +355,7 @@ function App() {
       media: 'Média',
       alta: 'Alta',
     }
+    const formatPercentage = (value: number) => value.toLocaleString('pt-BR', { maximumFractionDigits: 2 })
 
     return (
       <section className="data-quality" aria-labelledby="data-quality-title">
@@ -371,8 +405,15 @@ function App() {
                 </summary>
                 <div className="finding-content">
                   <p>{finding.description}</p>
+                  <dl className="finding-confidence" aria-label="Confiabilidade do achado">
+                    <div><dt>Confiança</dt><dd>{formatPercentage(finding.confidence_percentage)}%</dd></div>
+                    <div><dt>Cobertura</dt><dd>{formatPercentage(finding.coverage_percentage)}%</dd></div>
+                    {finding.veracity_confidence !== null && <div><dt>Confiança de veracidade</dt><dd>{formatPercentage(finding.veracity_confidence * 100)}%</dd></div>}
+                  </dl>
+                  {finding.confidence_basis.length > 0 && <div><strong>Base da confiança</strong><ul>{finding.confidence_basis.map((basis) => <li key={basis}>{basis}</li>)}</ul></div>}
                   {finding.evidence.length > 0 && <div><strong>Evidências</strong><ul>{finding.evidence.map((evidence, index) => <li key={`${evidence}-${index}`}>{evidence}</li>)}</ul></div>}
                   <p className="recommendation"><strong>Recomendação</strong>{finding.recommendation}</p>
+                  {finding.limitations && <p className="finding-limitation"><strong>Limitações</strong>{finding.limitations}</p>}
                 </div>
               </details>
             ))}
@@ -442,7 +483,7 @@ function App() {
         </button>
         <div className="brand-mark" aria-hidden="true">✦</div>
         <p className="eyebrow">LEITOR INTELIGENTE</p>
-        <h1>Converse com seu documento</h1>
+        <h1>Auditoria de Qualidade dos Dados</h1>
         <p className="subtitle">Envie um PDF ou CSV e obtenha respostas baseadas exclusivamente no conteúdo dele.</p>
       </header>
 
@@ -455,6 +496,19 @@ function App() {
             {file ? <div className="selected-file"><strong>{file.name}</strong><span>{(file.size / 1024 / 1024).toFixed(2)} MB</span></div> : <><strong>Arraste o PDF ou CSV aqui</strong><span>ou</span></>}
             <label htmlFor="document-upload" className="secondary-button">Selecionar arquivo</label>
           </div>
+          {file?.name.toLowerCase().endsWith('.csv') && (
+            <div className="reference-upload">
+              <div>
+                <strong>Arquivo de referência <span>opcional</span></strong>
+                <small>Adicione outro CSV para comparar consistência e alterações nos dados.</small>
+              </div>
+              <input ref={referenceFileInputRef} id="reference-upload" type="file" accept=".csv,text/csv" onChange={handleReferenceFileChange} />
+              <label htmlFor="reference-upload" className="secondary-button">
+                {referenceFile ? 'Trocar referência' : 'Selecionar referência'}
+              </label>
+              {referenceFile && <p title={referenceFile.name}>{referenceFile.name}</p>}
+            </div>
+          )}
           {file && <button className="primary-button upload-button" type="button" onClick={uploadDocument} disabled={isUploading}>{isUploading ? 'Preparando documento…' : 'Enviar e preparar'}</button>}
         </> : <><div className="document-ready"><div className="ready-icon" aria-hidden="true">✓</div><div><strong>{document.filename}</strong><p>{processedUnits} · {document.chunks} trechos prontos</p></div><button className="text-button" type="button" onClick={resetDocument}>Trocar</button></div>{document.data_quality && renderDataQuality(document.data_quality)}</>}
         {error && <p className="error-message" role="alert">{error}</p>}
