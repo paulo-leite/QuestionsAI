@@ -193,11 +193,6 @@ function App() {
       setError('Escolha um arquivo em formato PDF ou CSV.')
       return
     }
-    if (selectedFile.size > 20 * 1024 * 1024) {
-      setFile(null)
-      setError('O arquivo deve ter no máximo 20 MB.')
-      return
-    }
     setFile(selectedFile)
   }
 
@@ -213,12 +208,6 @@ function App() {
       setReferenceFile(null)
       event.target.value = ''
       setError('O arquivo de referência deve estar no formato CSV.')
-      return
-    }
-    if (selectedFile.size > 20 * 1024 * 1024) {
-      setReferenceFile(null)
-      event.target.value = ''
-      setError('O arquivo de referência deve ter no máximo 20 MB.')
       return
     }
     setReferenceFile(selectedFile)
@@ -488,7 +477,7 @@ function App() {
       </header>
 
       <section className="workspace" aria-label="Consulta de documento">
-        <div className="step-heading"><span>1</span><div><h2>Envie seu arquivo</h2><p>PDF ou CSV de até 20 MB</p></div></div>
+        <div className="step-heading"><span>1</span><div><h2>Envie seu arquivo</h2><p>PDF ou CSV</p></div></div>
         {!document ? <>
           <div className={`drop-zone ${file ? 'has-file' : ''}`} onDragOver={(event) => event.preventDefault()} onDrop={handleDrop}>
             <input ref={fileInputRef} id="document-upload" type="file" accept=".pdf,.csv,application/pdf,text/csv" onChange={handleFileChange} />
